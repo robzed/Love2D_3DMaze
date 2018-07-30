@@ -10,6 +10,6 @@ This one was inspired by a ZX Spectum BASIC program in a book called "Over the S
 In fact, due to the Internet Archive I can show you the screen shot out of the book itself: https://archive.org/stream/over-the-spectrum/OverTheSpectrum#page/n23
 
 # Running this
-At the moment I'm using ZeroBrane Studio to run this in a copy of Love2d 0.10.1 Super Toast.
+At the moment I'm using ZeroBrane Studio to run this in a copy in Love2d 0.10.1 Super Toast.
 
 At some point I'll provide some more instructions for running it stand-alone.
