@@ -2,6 +2,7 @@
 -- Written by Rob Probin July 2018, in the Lake District, UK.
 -- Copyright (c) 2018 Rob Probin
 require('utils')
+require('strict')
 
 -- @todo items:
 -- * Fix Z clipping
@@ -99,7 +100,7 @@ function get_shared_point(x, z, direction, level)
         end
     end
     
-    new_vertex = { x1, y1, z1, ["walls"] = {}  }
+    local new_vertex = { x1, y1, z1, ["walls"] = {}  }
     --print("new", x1, y1, z1)
     table.insert(maze_points, new_vertex)
     return new_vertex
@@ -166,10 +167,10 @@ function add_east_west_wall(x, y, attr)
 end
 
 function generic_line_parser(line, y, match_table)
-    x = 1
+    local x = 1
     for segment in line:gmatch("..?.?") do
         --print(">"..segment.."<")
-        f = match_table[segment]
+        local f = match_table[segment]
         if f then
             f(x, y)
         else
