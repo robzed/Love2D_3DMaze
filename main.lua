@@ -271,8 +271,8 @@ function translate_rotate_perspective_projection(playerx, playery, playerz, ry)
         --z1 = z1 * screen_scale
         --print("scaled", x1, y1, z1)
         
-        local xp = 0
-        local yp = 0
+        local xp
+        local yp
         local clip_required = false
         if z1 < clip_z_depth then
             clip_required = true
@@ -287,13 +287,13 @@ function translate_rotate_perspective_projection(playerx, playery, playerz, ry)
             yp = focal_length * y1 / z1
             
             --print("persp.", xp, yp)
+            
+            -- transform for screen center
+            xp = xp + screen_offset_x
+            yp = - yp + screen_offset_y
+            --print("screen transform", xp, yp)
         end
-        
-        -- transform for screen center
-        xp = xp + screen_offset_x
-        yp = - yp + screen_offset_y
-        
-        --print("screen transform", xp, yp)
+    
         vertex.xp = xp
         vertex.yp = yp
         vertex.clip = clip_required
