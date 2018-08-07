@@ -5,7 +5,6 @@ require('utils')
 require('strict')
 
 -- @todo items:
--- * Fix Z clipping
 -- * Collision detect with walls (to 0.1 to wall)
 -- * Fix step left and right
 -- * Other things in maze? (round smiley facces? caves monsters?)
@@ -15,7 +14,7 @@ require('strict')
 local wall_width = 3.0
 local wall_height = 2.0
 local player_height = 1.2
-local clip_z_depth = 0.1
+local clip_z_depth = 0.01
 local view_scale = 2.1
 
 -- player vars
@@ -230,8 +229,28 @@ function convert_walls_to_coords()
     end
 end
 
+local focal_length = 1
+local screen_offset_x = 1
+local screen_offset_y = 1
+    
+function perspective_projection(x1, y1, z1)
+    -- perspective projection
+    local xp = focal_length * x1 / z1
+    local yp = focal_length * y1 / z1
+    
+    --print("persp.", xp, yp)
+    
+    -- transform for screen center
+    xp = xp + screen_offset_x
+    yp = - yp + screen_offset_y
+    
+    --print("screen transform", xp, yp)
 
-function translate_rotate_perspective_projection(playerx, playery, playerz, ry)
+    return xp, yp
+end
+
+
+function translate_rotate_perspective_projection(point_list, playerx, playery, playerz, ry)
     -- using combining the operations into a 4x4 matrix and applying that 
     -- is the fastest. However, since we are only translating in 3 directions, 
     -- rotating in 1 direction then we use discrete equations.
@@ -240,15 +259,15 @@ function translate_rotate_perspective_projection(playerx, playery, playerz, ry)
     local cosA = math.cos(ry)
     local sinA = math.sin(ry)
 
-    local focal_length = love.graphics.getWidth() / view_scale
-    
+    focal_length = love.graphics.getWidth() / view_scale
+
     -- wall is about 1/2 screen width???
     --local screen_scale = love.graphics.getWidth() / view_scale
-    local screen_offset_x = love.graphics.getWidth() / 2
-    local screen_offset_y = love.graphics.getHeight() / 2
+    screen_offset_x = love.graphics.getWidth() / 2
+    screen_offset_y = love.graphics.getHeight() / 2
     
     -- no backface culling because these wall 2d planes are actually sheets with two sides (3d)
-    for k, vertex in ipairs(maze_points) do
+    for k, vertex in ipairs(point_list) do
         local x1, y1, z1 = unpack(vertex)
         --print("base", x1, y1, z1)
         -- translation to player position
@@ -282,25 +301,19 @@ function translate_rotate_perspective_projection(playerx, playery, playerz, ry)
             end
             
         else
-            -- perspective projection
-            xp = focal_length * x1 / z1
-            yp = focal_length * y1 / z1
-            
-            --print("persp.", xp, yp)
-            
-            -- transform for screen center
-            xp = xp + screen_offset_x
-            yp = - yp + screen_offset_y
-            --print("screen transform", xp, yp)
+            xp, yp = perspective_projection(x1, y1, z1)
         end
     
         vertex.xp = xp
         vertex.yp = yp
         vertex.clip = clip_required
         vertex.z = z1_new
-        
+        -- for debug
+        vertex.x = x1_new
+        vertex.y = y1
     end
 end
+
 
 --[[
 function create_display_polys()
@@ -313,11 +326,55 @@ function create_display_polys()
 end
 --]]
 
+function find_clip_z_depth_intersection_point(vertex1, vertex2)
+    local x1, y1, z1 = vertex1.x, vertex1.y, vertex1.z
+    local x2, y2, z2 = vertex2.x, vertex2.y, vertex2.z
+    
+    -- General equation of a line in 2d:
+    --   y = mx + c
+    --  Where m is the slope and c is the y intercept.
+    -- 
+    -- 
+    -- In our 3D case, we are interested in two specific cases, from the equation of a line.
+    -- y = slope_yz * z + cy
+    -- x = slope_xz * z + cx
+    -- 
+    -- where we define the z as the clip point.
+    -- 
+    -- The slope in these cases is:
+    
+    local slope_yz = (y2 - y1) / (z2 - z1)
+    local slope_xz = (x2 - x1) / (z2 - z1)
+    
+    -- NOTE: We know z2, z1 are not the same point (i.e. z2 - z1 = 0) because otherwise the whole line would have been clipped)
+    -- 
+    -- The intersect in these cases is (we can use either point), using the equation above:
+    
+    local cy = y1 - slope_yz * z1
+    local cx = x1 - slope_xz * z1
+    
+    -- So at z = clip_z_depth the entire equation looks like:
+    
+    local y = slope_yz * clip_z_depth + cy
+    local x = slope_xz * clip_z_depth + cx
+
+    return x, y, clip_z_depth
+end
+
+function print_wall_coords(wall, type_)
+    print(type_)
+    
+    for k,wallv in ipairs(wall) do
+        print(k, ":", wallv.x, wallv.y, wallv.z)
+    end
+end
+
 function draw_wall(wall)
     -- Clipping for Z
     -- clipping https://en.wikipedia.org/wiki/Clipping_(computer_graphics)
     -- https://stackoverflow.com/questions/7604322/clip-matrix-for-3d-perspective-projection
-
+    -- https://en.wikipedia.org/wiki/Cohen%E2%80%93Sutherland_algorithm
+    local magic=0
     local x1, y1, clip1 = wall[1].xp, wall[1].yp, wall[1].clip
     local x2, y2, clip2 = wall[2].xp, wall[2].yp, wall[2].clip
     local x3, y3, clip3 = wall[3].xp, wall[3].yp, wall[3].clip
@@ -326,10 +383,57 @@ function draw_wall(wall)
     if wall.zclip == 4 then
         return
     elseif wall.zclip == 0 then
-
+        -- no clipping required
     elseif wall.zclip == 2 then
-        -- @todo: fix this clip condition
-        return
+        
+        local new_point_list = {}
+        -- because of geometry, it must be two consecutive points that need clipping.
+        if clip1 then
+            if clip4 then
+                -- two new points are on line 1-2 and 3-4                
+                local x, y, z = find_clip_z_depth_intersection_point(wall[1], wall[2])
+                x1, y1 = perspective_projection(x, y, z)
+                x, y, z = find_clip_z_depth_intersection_point(wall[3], wall[4])
+                x4, y4 = perspective_projection(x, y, z)
+                
+                magic=1
+            elseif clip2 then
+                -- two new points are on line 4-1 and 2-3                
+                local x, y, z = find_clip_z_depth_intersection_point(wall[4], wall[1])
+                x1, y1 = perspective_projection(x, y, z)
+                x, y, z = find_clip_z_depth_intersection_point(wall[2], wall[3])
+                x2, y2 = perspective_projection(x, y, z)
+                
+                magic=2
+            else
+                error("Error clip Geometry is 1 and 3")
+            end
+        elseif clip3 then
+            if clip2 then
+                -- two new points are on line 3-4 and 1-2
+                local x, y, z = find_clip_z_depth_intersection_point(wall[1], wall[2])
+                x2, y2 = perspective_projection(x, y, z)
+                x, y, z = find_clip_z_depth_intersection_point(wall[3], wall[4])
+                x3, y3 = perspective_projection(x, y, z)                
+                
+                magic=3
+            elseif clip4 then
+                -- two new points are on line 2-3 and 4-1
+                local x, y, z = find_clip_z_depth_intersection_point(wall[2], wall[3])
+                x3, y3 = perspective_projection(x, y, z)
+                x, y, z = find_clip_z_depth_intersection_point(wall[4], wall[1])
+                x4, y4 = perspective_projection(x, y, z)
+                
+                magic=4
+            else
+                error("Error clip Geometry is 3 and 1") -- even on error cases this shouldn't happen
+            end
+        else
+            error("Error clip Geometry is 2 and 4")
+        end
+    
+        --print("clip type", magic)
+        --os.exit(1)
     elseif wall.zclip ~= 0 then
         error("As yet unsupported wall zclip number " .. tostring(wall.zclip))
     end
@@ -347,6 +451,24 @@ function draw_wall(wall)
         green = 150
         blue = 200
     end
+    
+    --[[
+    if magic == 1 then
+        red = 0
+    elseif magic == 2 then
+        red = 255
+        blue = 0
+        green = 0
+    elseif magic == 3 then
+        red = 0
+        blue = 0
+        green = 255
+    elseif magic == 4 then
+        red = 255
+        blue = 0
+        green = 255
+    end
+    --]]
     
     --print(x1, y1, x2, y2, x3, y3, x4, y4) 
     love.graphics.setColor( red, green, blue, alpha)
@@ -371,8 +493,8 @@ function draw_maze()
     
     -- We currently use painter Algorithm
     table.sort(wall_faces, wall_z_compare)
-    for k,v in ipairs(wall_faces) do
-        draw_wall(v)
+    for k,wall in ipairs(wall_faces) do
+        draw_wall(wall)
     end
 end
 
@@ -404,7 +526,7 @@ function love.draw()
     clear_walls_zclip()
     local x1 = pos_x * wall_width
     local z1 = pos_z * wall_width
-    translate_rotate_perspective_projection(x1, player_height, z1, direction)
+    translate_rotate_perspective_projection(maze_points, x1, player_height, z1, direction)
     draw_maze()
     
     local major, minor, revision, codename = love.getVersion()
